@@ -18,7 +18,6 @@ python -m pip install -r requirements.txt
 
 ## Usage
 
-Run commands from the repository root.
 SAC and TD-MPC2 use the configurations in `agents/configs/` and the included walking motion.
 
 ### Training
@@ -61,7 +60,8 @@ python -m scripts.eval.eval_sac \
   --ckpt models/sac_walk1/final.pt --device cuda:0
 ```
 
-Keep the `.rms.pt` normalization file beside its checkpoint.
+SAC evaluation needs both `final.pt` and `final.rms.pt` in the same folder.
+The second file stores the input normalization used during training.
 For Fast SAC, pass `--fast-sac` during both training and evaluation.
 
 **PPO**
