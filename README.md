@@ -1,97 +1,93 @@
 # LocoMimic
 
-G1 humanoid motion imitation with custom TD-MPC2, SAC, and the Unitree PPO baseline.
-The [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) submodule supplies the simulation tasks and PPO.
+Tools for training and evaluating human motion imitation on the Unitree G1 humanoid.
+Includes custom TD-MPC2, SAC, and the PPO baseline from [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab).
 
 ## Setup
 
-Use Linux with an NVIDIA GPU and a CUDA-compatible driver for training.
-Clone the repository and install the dependencies:
+Use Linux with an NVIDIA GPU and a compatible CUDA driver.
 
 ```bash
 git clone --recurse-submodules https://github.com/dineshvarunshankar/LocoMimic.git
 cd LocoMimic
 conda create -n locomimic python=3.11
 conda activate locomimic
-git submodule update --init --recursive
 python -m pip install -e ./unitree_rl_mjlab
 python -m pip install -r requirements.txt
 ```
 
-The pinned submodule installs `mjlab==1.2.0` and `mujoco-warp==3.5.0`.
+## Usage
 
-The example motion is `data/lafan1_retargeted_npz/g1/walk1_subject1.npz`.
-To convert another G1 CSV motion, use the submodule converter:
+Run commands from the repository root.
+SAC and TD-MPC2 use the configurations in `agents/configs/` and the included walking motion.
 
-```bash
-mkdir -p data/lafan1_retargeted_npz/g1
-python unitree_rl_mjlab/scripts/csv_to_npz.py \
-  --robot g1 \
-  --input-file /path/to/motion.csv \
-  --output-name "$PWD/data/lafan1_retargeted_npz/g1/motion.npz" \
-  --input-fps 30 --output-fps 50
-```
+### Training
 
-Set `motion_path` in the algorithm configuration to use the converted motion.
-
-## Run
-
-Run all commands from the repository root.
-
-### TD-MPC2
+**TD-MPC2**
 
 ```bash
-python -m scripts.train.train_tdmpc2 \
-  --config agents/configs/tdmpc2_config.yaml \
-  --name tdmpc2_walk1 \
-  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
-  --num_envs 512
-
-python -m scripts.eval.eval_tdmpc2 \
-  --config agents/configs/tdmpc2_config.yaml \
-  --checkpoint models/tdmpc2_walk1/final.pt \
-  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
-  --num-envs 1 --episodes 1
+python -m scripts.train.train_tdmpc2 --name tdmpc2_walk1
 ```
 
-Add `--disable-wandb` to train without W&B.
-Add `--video` to evaluation to save an MP4.
-Use `--episode-length-s 20` to set the evaluation horizon.
-The `--no-terminations` flag disables failure conditions and retains the episode timeout.
-
-### SAC
+**SAC**
 
 ```bash
-python -m scripts.train.train_sac \
-  --config agents/configs/sac_config.yaml \
-  --name sac_walk1 \
-  --task Unitree-G1-Tracking --num_envs 4096
-
-python -m scripts.eval.eval_sac \
-  --config agents/configs/sac_config.yaml \
-  --ckpt models/sac_walk1/final.pt \
-  --task Unitree-G1-Tracking --device cuda:0
+python -m scripts.train.train_sac --name sac_walk1
 ```
 
-SAC evaluation opens the native viewer.
-Keep each `.rms.pt` normalization file beside its `.pt` checkpoint.
-Use `--fast-sac` for both training and evaluation of the Fast SAC variant.
-SAC `buffer_size` counts transitions per environment.
-
-### PPO
+**PPO**
 
 ```bash
 python unitree_rl_mjlab/scripts/train.py Unitree-G1-Tracking \
   --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
   --env.scene.num-envs 4096
+```
 
+### Evaluation
+
+**TD-MPC2**
+
+```bash
+python -m scripts.eval.eval_tdmpc2 \
+  --checkpoint models/tdmpc2_walk1/final.pt --episodes 1
+```
+
+Add `--video` to save an MP4.
+
+**SAC**
+
+```bash
+python -m scripts.eval.eval_sac \
+  --ckpt models/sac_walk1/final.pt --device cuda:0
+```
+
+Keep the `.rms.pt` normalization file beside its checkpoint.
+For Fast SAC, pass `--fast-sac` during both training and evaluation.
+
+**PPO**
+
+```bash
 python unitree_rl_mjlab/scripts/play.py Unitree-G1-Tracking \
   --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
   --checkpoint-file /path/to/model.pt
 ```
 
-PPO checkpoints are in `logs/rsl_rl/`.
-SAC and TD-MPC2 checkpoints are in `models/<run_name>/`.
+SAC and TD-MPC2 save checkpoints in `models/<run_name>/`; PPO uses `logs/rsl_rl/`.
+
+## Project Structure
+
+```text
+agents/
+  sac/                       SAC and distributional critic
+  tdmpc2/                    World model and MPC planner
+  configs/                   Algorithm configurations
+rl/                          Environment wrappers
+scripts/
+  train/                     Training entry points
+  eval/                      Evaluation and video tools
+unitree_rl_mjlab/             Simulation tasks and PPO baseline
+data/lafan1_retargeted_npz/   Motion data
+```
 
 ## References
 
