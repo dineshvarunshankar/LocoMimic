@@ -10,7 +10,7 @@ from torch.distributions import Normal
 from agents.base import BaseAlgorithm
 from agents.tdmpc2.model import WorldModel, WorldModelSpec
 from agents.tdmpc2.planner import MPPIPlanner
-from agents.tdmpc2.replay_buffer import SequenceReplayBuffer
+from agents.tdmpc2.replay_buffer import ReplayNotReadyError, SequenceReplayBuffer
 from agents.tdmpc2.scale import RunningScale
 from agents.tdmpc2.utils import (
     RunningObsNormalizer,
@@ -313,6 +313,8 @@ class TDMPC2Agent(BaseAlgorithm):
                 z_sub = z[planner_env_ids]
                 if exog_plan_seq is None:
                     exog_plan_seq = exog_obs.unsqueeze(1).expand(-1, self.config.horizon + 1, -1)
+                else:
+                    exog_plan_seq = self.exog_normalizer(exog_plan_seq)
                 ex_seq_sub = exog_plan_seq[planner_env_ids]
                 prev_mean = self.plan_mean[planner_env_ids]
                 mpc_action, next_mean = self.planner.plan(
@@ -360,10 +362,13 @@ class TDMPC2Agent(BaseAlgorithm):
 
         agg: Dict[str, float] = {}
         for _ in range(self.current_utd):
-            batch = self.replay.sample_sequence(
-                batch_size=self.config.batch_size,
-                horizon=self.config.horizon,
-            )
+            try:
+                batch = self.replay.sample_sequence(
+                    batch_size=self.config.batch_size,
+                    horizon=self.config.horizon,
+                )
+            except ReplayNotReadyError:
+                return {}
 
             model_loss, model_metrics = self._model_loss(batch)
             self.model_optimizer.zero_grad(set_to_none=True)

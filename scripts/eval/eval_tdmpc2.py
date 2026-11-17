@@ -1,17 +1,32 @@
 import argparse
+import math
 
 import torch
 
 import mjlab.tasks  # noqa: F401
 import src.tasks  # noqa: F401
-from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs.mdp.terminations import time_out
+from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.tasks.registry import load_env_cfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.torch import configure_torch_backends
 
 from agents.configs.config_loader import load_tdmpc2_config
 from agents.tdmpc2.tdmpc2_agent import TDMPC2Agent
+from rl.final_observation_env import FinalObservationEnv
 from rl.tdmpc2_env_wrapper import TDMPC2VecEnvWrapper
+
+
+def _configure_evaluation_horizon(env_cfg, episode_length_s: float, no_terminations: bool):
+    if not math.isfinite(episode_length_s) or episode_length_s <= 0:
+        raise ValueError("--episode-length-s must be finite and positive")
+    env_cfg.episode_length_s = episode_length_s
+    if no_terminations:
+        env_cfg.terminations = {
+            name: term for name, term in env_cfg.terminations.items() if term.time_out
+        }
+    # Play configs can remove this term or use a practically infinite horizon.
+    env_cfg.terminations["time_out"] = TerminationTermCfg(func=time_out, time_out=True)
 
 
 def evaluate():
@@ -22,6 +37,8 @@ def evaluate():
     parser.add_argument("--motion-file", type=str, default=None)
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--episode-length-s", type=float, default=None,
+                        help="Episode duration; defaults to the training task horizon")
     parser.add_argument("--video", action="store_true", help="Record an MP4 video of the evaluation")
     parser.add_argument("--no-terminations", action="store_true", help="Disable early terminations so the episode plays out")
     args = parser.parse_args()
@@ -40,16 +57,18 @@ def evaluate():
     motion_cmd = env_cfg.commands["motion"]
     assert isinstance(motion_cmd, MotionCommandCfg)
     motion_cmd.motion_file = cfg.motion_path
-    env_cfg.auto_reset = False
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.observations["actor"].concatenate_terms = False
 
+    episode_length_s = args.episode_length_s
+    if episode_length_s is None:
+        episode_length_s = float(load_env_cfg(cfg.task).episode_length_s)
+    _configure_evaluation_horizon(env_cfg, episode_length_s, args.no_terminations)
     if args.no_terminations:
-        print("[INFO] Terminations disabled. The episode will run for the full length.")
-        env_cfg.terminations = {}
+        print("[INFO] Failure terminations disabled; episode timeouts remain enabled.")
 
     render_mode = "rgb_array" if args.video else None
-    env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device, render_mode=render_mode)
+    env = FinalObservationEnv(cfg=env_cfg, device=cfg.device, render_mode=render_mode)
     
     if args.video:
         import os
@@ -102,11 +121,6 @@ def evaluate():
                 if len(completed) >= args.episodes:
                     break
             episode_returns[finished] = 0.0
-            reset_endog, reset_exog, _ = env.reset(env_ids=finished)
-            next_endog = next_endog.clone()
-            next_exog = next_exog.clone()
-            next_endog[finished] = reset_endog[finished]
-            next_exog[finished] = reset_exog[finished]
             agent.reset_planner(finished)
 
         endog_obs = next_endog

@@ -1,122 +1,100 @@
 # LocoMimic
 
-RL algorithms (PPO, SAC, TDMPC2) with [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) for G1 humanoid motion imitation.
+G1 humanoid motion imitation with custom TD-MPC2, SAC, and the Unitree PPO baseline.
+The [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) submodule supplies the simulation tasks and PPO.
 
 ## Setup
 
-```bash
+Use Linux with an NVIDIA GPU and a CUDA-compatible driver for training.
+Clone the repository and install the dependencies:
 
-#create conda environment
-conda create -n locomimic python=3.10
+```bash
+git clone --recurse-submodules https://github.com/dineshvarunshankar/LocoMimic.git
+cd LocoMimic
+conda create -n locomimic python=3.11
 conda activate locomimic
-# Initialize submodules
 git submodule update --init --recursive
-
-# Install Unitree RL mjlab
-cd unitree_rl_mjlab
-pip install -e .
-cd ..
-
-# Install dependencies (redundancies from submodule to be cleaned - TODO)
-pip install -r requirements.txt
+python -m pip install -e ./unitree_rl_mjlab
+python -m pip install -r requirements.txt
 ```
 
-## Project Structure
+The pinned submodule installs `mjlab==1.2.0` and `mujoco-warp==3.5.0`.
 
-```
-.
-├── unitree_rl_mjlab/          # Submodule: Unitree's framework
-├── algorithms/                 # Custom RL algorithms (TODO: implement)
-│   ├── base.py                # Common interface
-│   ├── ppo/                   # PPO
-│   ├── sac/                   # SAC
-│   └── tdmpc2/                # TDMPC2
-├── configs/                    # Algorithm configs
-├── scripts/                    # Training & evaluation scripts
-│   ├── train/                 # Training scripts (TODO: implement)
-│   ├── test/                  # Testing scripts (TODO: implement)
-│   └── train(old-reference)/  # Old training code (reference only)
-├── utils/                      # Utility scripts (convert, play, visualize)
-├── data/lafan1_retargeted/    # Motion data (CSV)
-├── logs/                       # Training logs
-├── models/                     # Saved checkpoints
-└── results/                    # Evaluation results
-```
-
-## Usage
-
-Run these commands from the repo root (`LocoMimic/`).
-
-### Convert Motion Data
+The example motion is `data/lafan1_retargeted_npz/g1/walk1_subject1.npz`.
+To convert another G1 CSV motion, use the submodule converter:
 
 ```bash
-python utils/convert_motions.py
+mkdir -p data/lafan1_retargeted_npz/g1
+python unitree_rl_mjlab/scripts/csv_to_npz.py \
+  --robot g1 \
+  --input-file /path/to/motion.csv \
+  --output-name "$PWD/data/lafan1_retargeted_npz/g1/motion.npz" \
+  --input-fps 30 --output-fps 50
 ```
 
-### Train with Unitree PPO Baseline
+Set `motion_path` in the algorithm configuration to use the converted motion.
+
+## Run
+
+Run all commands from the repository root.
+
+### TD-MPC2
 
 ```bash
-cd unitree_rl_mjlab
-python scripts/train.py Unitree-G1-Tracking-No-State-Estimation \
-  --motion-file ../data/motions_npz/walk1.npz \
-  --env.scene.num-envs 4096
-cd ..
+python -m scripts.train.train_tdmpc2 \
+  --config agents/configs/tdmpc2_config.yaml \
+  --name tdmpc2_walk1 \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --num_envs 512
+
+python -m scripts.eval.eval_tdmpc2 \
+  --config agents/configs/tdmpc2_config.yaml \
+  --checkpoint models/tdmpc2_walk1/final.pt \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --num-envs 1 --episodes 1
 ```
-### Evaluate PPO
-```bash
-python scripts/play.py Unitree-G1-Tracking --motion_file=/home/dtc/dinesh_varun/16831/project/16831_IRL_Project/unitree_rl_mjlab/src/assets/motions/g1/walk1_subject1.npz --checkpoint_file=/home/dtc/dinesh_varun/16831/project/16831_IRL_Project/logs/rsl_rl/g1_tracking/2026-04-23_16-27-13_PPO/model_20500.pt
-```
-### Train SAC (Repo Baseline)
+
+Add `--disable-wandb` to train without W&B.
+Add `--video` to evaluation to save an MP4.
+Use `--episode-length-s 20` to set the evaluation horizon.
+The `--no-terminations` flag disables failure conditions and retains the episode timeout.
+
+### SAC
 
 ```bash
 python -m scripts.train.train_sac \
   --config agents/configs/sac_config.yaml \
-  --task Unitree-G1-Tracking \
-  --num_envs 4096
+  --name sac_walk1 \
+  --task Unitree-G1-Tracking --num_envs 4096
+
+python -m scripts.eval.eval_sac \
+  --config agents/configs/sac_config.yaml \
+  --ckpt models/sac_walk1/final.pt \
+  --task Unitree-G1-Tracking --device cuda:0
 ```
 
-### Train TD-MPC2
+SAC evaluation opens the native viewer.
+Keep each `.rms.pt` normalization file beside its `.pt` checkpoint.
+Use `--fast-sac` for both training and evaluation of the Fast SAC variant.
+SAC `buffer_size` counts transitions per environment.
+
+### PPO
 
 ```bash
-python -m scripts.train.train_tdmpc2 \
-  --config agents/configs/tdmpc2_config.yaml --name stable512_walk1
+python unitree_rl_mjlab/scripts/train.py Unitree-G1-Tracking \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --env.scene.num-envs 4096
+
+python unitree_rl_mjlab/scripts/play.py Unitree-G1-Tracking \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --checkpoint-file /path/to/model.pt
 ```
 
+PPO checkpoints are in `logs/rsl_rl/`.
+SAC and TD-MPC2 checkpoints are in `models/<run_name>/`.
 
-```bash
-# Example override for motion file and env count
-python -m scripts.train.train_tdmpc2 \
-  --config agents/configs/tdmpc2_config.yaml \
-  --motion-file data/motions_npz/walk1.npz \
-  --num_envs 128 \
-  --disable-wandb
-```
+## References
 
-```bash
-# Resume from checkpoint
-python -m scripts.train.train_tdmpc2 \
-  --config agents/configs/tdmpc2_config.yaml \
-  --load models/<run_name>/final.pt
-```
-
-### Evaluate TD-MPC2 Checkpoint
-
-```bash
-python -m scripts.eval.eval_tdmpc2 \
-  --checkpoint models/run3/ckpt_step_7450000.pt \
-  --config agents/configs/tdmpc2_config.yaml \
-  --num-envs 32 \
-  --episodes 20
-```
-
-### Save Video
-
-```bash
-python -m scripts.eval.eval_tdmpc2 \
-  --checkpoint models/run3/ckpt_step_7450000.pt \
-  --config agents/configs/tdmpc2_config.yaml \
-  --num-envs 1 \
-  --episodes 1 \
-  --video
-```
-
+- [TD-MPC2: Scalable, Robust World Models for Continuous Control](https://arxiv.org/abs/2310.16828)
+- [Soft Actor-Critic](https://arxiv.org/abs/1801.01290)
+- [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)

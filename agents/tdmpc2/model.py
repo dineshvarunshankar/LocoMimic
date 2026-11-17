@@ -12,13 +12,6 @@ class SimNorm(nn.Module):
     """
 
     def __init__(self, group_dim: int, temperature: float = 1.0):
-
-        """
-        group dim - the size of each group 
-        temperature - modulates the sparsity of the representation.
-                    high the temp -> distribution becomes smoother/more uniform.
-                    low the temp -> distribution becomes sharper favoring largest number.
-        """
         super().__init__()
         self.group_dim = group_dim
         self.temperature = temperature
@@ -53,7 +46,6 @@ class NormedLinear(nn.Module):
             layers.append(nn.ReLU())
         else:
             raise ValueError(f"Unsupported activation: {activation}")
-        #unpacked the list in sequential 
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -97,14 +89,12 @@ class WorldModel(nn.Module):
         super().__init__()
         self.spec = spec
         s = spec
-        # Encoder: maps observations to latent representations.
         self.encoder = nn.Sequential(
             NormedLinear(s.endog_dim + s.exog_dim, s.encoder_dim, activation="mish"),
             nn.Linear(s.encoder_dim, s.latent_dim),
             nn.LayerNorm(s.latent_dim),
             SimNorm(s.simnorm_dim, s.simnorm_temp),
         )
-        # Dynamics model: models forward dynamics.
         self.dynamics = nn.Sequential(
             NormedLinear(s.latent_dim + s.act_dim + s.exog_dim, s.mlp_dim, activation="mish"),
             NormedLinear(s.mlp_dim, s.mlp_dim, activation="mish"),
@@ -112,13 +102,11 @@ class WorldModel(nn.Module):
             nn.LayerNorm(s.latent_dim),
             SimNorm(s.simnorm_dim, s.simnorm_temp),
         )
-        # Reward head: predicts reward distribution.
         self.reward_head = nn.Sequential(
             NormedLinear(s.latent_dim + s.act_dim + s.exog_dim, s.mlp_dim, activation="mish"),
             NormedLinear(s.mlp_dim, s.mlp_dim, activation="mish"),
             nn.Linear(s.mlp_dim, s.num_bins),
         )
-        # Termination head for episodic tasks.
         self.termination_head = (
             nn.Sequential(
                 NormedLinear(s.latent_dim + s.exog_dim, s.mlp_dim, activation="mish"),
@@ -128,13 +116,11 @@ class WorldModel(nn.Module):
             if s.episodic
             else None
         )
-        # Policy prior.
         self.pi_head = nn.Sequential(
             NormedLinear(s.latent_dim + s.exog_dim, s.mlp_dim, activation="mish"),
             NormedLinear(s.mlp_dim, s.mlp_dim, activation="mish"),
             nn.Linear(s.mlp_dim, 2 * s.act_dim),
         )
-        # Q heads: distributional critics.
         self.q_heads = nn.ModuleList(
             [
                 nn.Sequential(

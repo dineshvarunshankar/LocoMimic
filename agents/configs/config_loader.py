@@ -9,6 +9,9 @@ import yaml
 @dataclass
 class SACConfig:
     motion_path: str
+    device: str
+    seed: int
+    wandb_project: str
     actor_hidden_dim: list[int]
     critic_hidden_dim: list[int]
     lr: float
@@ -17,13 +20,60 @@ class SACConfig:
     tau: float
     batch_size: int
     buffer_size: int
-    total_steps: int
+    num_learning_iterations: int
     learning_starts: int
     gradient_steps: int
+    alpha_init: float
+    target_entropy_ratio: float
+    log_std_min: float
+    log_std_max: float
+    log_freq: int
+    ep_stats_window: int
+    ckpt_fractions: list[float]
+    use_layer_norm: bool
+    use_mean_q: bool
+    num_envs: int = 4096
+    policy_frequency: int = 1
+    use_autotune: bool = True
+    alpha_lr: float = 3e-05
+    critic_grad_clip: float = 1.0
+    use_distributional: bool = False
+    num_atoms: int = 101
+    v_min: float = -20.0
+    v_max: float = 20.0
+
+
+@dataclass
+class PPOConfig:
+    motion_path: str
+    hidden_dim: int
+    lr: float
+    gamma: float
+    gae_lambda: float
+    clip_range: float
+    n_epochs: int
+    batch_size: int
+    rollout_steps: int
+    ent_coef: float
+    vf_coef: float
+    max_grad_norm: float
+    total_steps: int
     log_freq: int
     save_freq: int
+    n_envs: int = 1
+    action_scale: float = 0.1
+    reset_joint_noise: float = 0.0
+    reset_vel_noise: float = 0.0
+    term_height_threshold: float = 0.4
+    term_orientation_threshold: float = 1.2
+    init_log_std: float = -2.5
+    lr_anneal: bool = True
+    seed: int = 42
+    target_kl: float = 0.01
+    vector_env_type: str = "async"
+    vector_env_context: str = "spawn"
+    torch_num_threads: int = 1
     device: str = "cpu"
-    num_envs: int = 1
 
 
 @dataclass
@@ -136,6 +186,11 @@ def load_config(path: str) -> SACConfig:
     return SACConfig(**cfg)
 
 
+def load_ppo_config(path: str) -> PPOConfig:
+    cfg = _auto_device(_load_yaml(path))
+    return PPOConfig(**cfg)
+
+
 def load_tdmpc2_config(path: str) -> TDMPC2Config:
     raw = _load_yaml(path)
 
@@ -148,23 +203,23 @@ def load_tdmpc2_config(path: str) -> TDMPC2Config:
                 merged.update(part)
         raw = merged
 
-    # Legacy aliases.
-    if "motion_file" in raw and "motion_path" not in raw:
-        raw["motion_path"] = raw["motion_file"]
-    if "learning_rate" in raw and "lr" not in raw:
-        raw["lr"] = raw["learning_rate"]
-    if "num_samples" in raw and "mpc_samples" not in raw:
-        raw["mpc_samples"] = raw["num_samples"]
-    if "num_elites" in raw and "mpc_elites" not in raw:
-        raw["mpc_elites"] = raw["num_elites"]
-    if "num_iterations" in raw and "mpc_iterations" not in raw:
-        raw["mpc_iterations"] = raw["num_iterations"]
-    if "temperature" in raw and "mpc_temperature" not in raw:
-        raw["mpc_temperature"] = raw["temperature"]
-    if "q_target_ema" in raw and "tau" not in raw:
-        raw["tau"] = 1.0 - float(raw["q_target_ema"])
-    if "support_range" in raw and "value_support" not in raw:
-        raw["value_support"] = raw["support_range"]
+    aliases = {
+        "motion_file": "motion_path",
+        "learning_rate": "lr",
+        "num_samples": "mpc_samples",
+        "num_elites": "mpc_elites",
+        "num_iterations": "mpc_iterations",
+        "temperature": "mpc_temperature",
+        "support_range": "value_support",
+    }
+    for legacy, canonical in aliases.items():
+        if legacy in raw:
+            value = raw.pop(legacy)
+            raw.setdefault(canonical, value)
+    if "q_target_ema" in raw:
+        value = raw.pop("q_target_ema")
+        if "tau" not in raw:
+            raw["tau"] = 1.0 - float(value)
     if "exogenous_terms" in raw:
         raw["exogenous_terms"] = tuple(raw["exogenous_terms"])
 

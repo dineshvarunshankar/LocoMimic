@@ -93,8 +93,20 @@ class TDMPC2VecEnvWrapper:
             actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
 
         obs_dict, reward, terminated, truncated, extras = self.env.step(actions)
-        actor_obs = obs_dict[self.actor_obs_key]
-        endog, exog = self._split_actor(actor_obs)
+        final_obs = extras.get("final_observation")
+        final_endog = final_exog = None
+        if final_obs is not None:
+            final_endog, final_exog = self._split_actor(final_obs[self.actor_obs_key])
+        # Split rollout last: planning must see the reset episode's actor terms.
+        endog, exog = self._split_actor(obs_dict[self.actor_obs_key])
+        replay_endog, replay_exog = endog, exog
+        if final_endog is not None:
+            ids = extras["final_env_ids"]
+            replay_endog, replay_exog = endog.clone(), exog.clone()
+            replay_endog[ids] = final_endog[ids]
+            replay_exog[ids] = final_exog[ids]
+        extras["final_endog_obs"] = replay_endog
+        extras["final_exog_obs"] = replay_exog
         self._last_endog = endog
         self._last_exog = exog
         return endog, exog, reward, terminated, truncated, extras

@@ -15,6 +15,7 @@ from mjlab.utils.torch import configure_torch_backends
 
 from agents.configs.config_loader import load_tdmpc2_config
 from agents.tdmpc2.tdmpc2_agent import TDMPC2Agent
+from rl.final_observation_env import FinalObservationEnv
 from rl.tdmpc2_env_wrapper import TDMPC2VecEnvWrapper
 
 
@@ -65,9 +66,9 @@ def _termination_flags(env_cfg, env: ManagerBasedRlEnv) -> dict[str, torch.Tenso
     if not isinstance(termination_terms, dict):
         return {}
     flags: dict[str, torch.Tensor] = {}
-    for name, term_cfg in termination_terms.items():
+    for name in termination_terms:
         try:
-            value = term_cfg.func(env, **term_cfg.params)
+            value = env.termination_manager.get_term(name)
         except Exception:
             continue
         if not isinstance(value, torch.Tensor):
@@ -126,13 +127,12 @@ def train():
     assert isinstance(motion_cmd, MotionCommandCfg)
     motion_cmd.motion_file = config.motion_path
 
-    env_cfg.auto_reset = False
     env_cfg.scene.num_envs = config.num_envs
     env_cfg.seed = config.seed
     # Keep actor terms as mjlab source of truth but return per-term tensors for splicing.
     env_cfg.observations["actor"].concatenate_terms = False
 
-    env = ManagerBasedRlEnv(cfg=env_cfg, device=config.device)
+    env = FinalObservationEnv(cfg=env_cfg, device=config.device)
     env = TDMPC2VecEnvWrapper(
         env=env,
         exogenous_terms=tuple(config.exogenous_terms),
@@ -226,16 +226,16 @@ def train():
                 planner_env_ids=planner_env_ids,
             )
 
-        next_endog_raw, next_exog_raw, reward, terminated, time_out, _ = env.step(action)
+        next_endog_raw, next_exog_raw, reward, terminated, time_out, extras = env.step(action)
 
-        # Store raw env transition before reset patching.
+        # Replay uses pre-reset terminal states; acting uses the returned reset states.
         agent.store_transition(
             endog_obs=endog_obs,
             exog_obs=exog_obs,
             action=action,
             reward=reward,
-            next_endog_obs=next_endog_raw,
-            next_exog_obs=next_exog_raw,
+            next_endog_obs=extras["final_endog_obs"],
+            next_exog_obs=extras["final_exog_obs"],
             terminated=terminated,
             time_out=time_out,
         )
@@ -262,11 +262,6 @@ def train():
             episode_returns[finished] = 0.0
             episode_lengths[finished] = 0.0
 
-            reset_endog, reset_exog, _ = env.reset(env_ids=finished)
-            next_endog = next_endog.clone()
-            next_exog = next_exog.clone()
-            next_endog[finished] = reset_endog[finished]
-            next_exog[finished] = reset_exog[finished]
             agent.reset_planner(finished)
 
         metrics = {}

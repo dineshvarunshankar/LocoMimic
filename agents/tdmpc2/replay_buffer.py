@@ -3,6 +3,10 @@ from __future__ import annotations
 import torch
 
 
+class ReplayNotReadyError(RuntimeError):
+    """Replay has too few valid sequences for the requested batch."""
+
+
 class SequenceReplayBuffer:
     """
     Per-environment circular replay with vectorized uniform slice sampling.
@@ -113,12 +117,12 @@ class SequenceReplayBuffer:
     @torch.no_grad()
     def sample_sequence(self, batch_size: int, horizon: int) -> dict[str, torch.Tensor]:
         if self.size < (horizon + 1) * self.num_envs:
-            raise RuntimeError("Replay buffer does not have enough data for sequence sampling")
+            raise ReplayNotReadyError("Replay buffer does not have enough data for sequence sampling")
         valid_mask = self._valid_start_mask(horizon)
         flat_valid = valid_mask.reshape(-1)
         valid_flat_idx = torch.nonzero(flat_valid, as_tuple=False).squeeze(-1)
         if valid_flat_idx.numel() < batch_size:
-            raise RuntimeError(
+            raise ReplayNotReadyError(
                 f"Could not sample {batch_size} valid sequences (got {int(valid_flat_idx.numel())})."
             )
 

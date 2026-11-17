@@ -1,16 +1,8 @@
-# Core
+# Install the pinned simulation stack first: pip install -e ./unitree_rl_mjlab
 numpy
 torch
 pyyaml
-
-# Logging
 wandb
-tensorboard
-
-# Utilities
 tqdm
-imageio
-matplotlib
-
-# Unitree RL mjlab dependencies (installed via submodule)
-# cd unitree_rl_mjlab && pip install -e .
+imageio[ffmpeg]
+pillow

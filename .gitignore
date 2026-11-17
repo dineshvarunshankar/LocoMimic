@@ -1,11 +1,13 @@
 
-# submodules
-unitree_rl_mjlab
+# Optional simulation assets
 /mujoco_menagerie/
 /unitree_mujoco/
 
 # Experiment artifacts
 /wandb/
+/models/
+/results/
+/videos/
 /MUJOCO_LOG.TXT
 
 # Python
@@ -20,6 +22,8 @@ logs/
 *.log
 
 # Environments
+.venv/
+venv/
 .env
 *.env
 
