@@ -1,69 +1,100 @@
 # LocoMimic
 
-This repository contains tools for simulating, visualizing, and training retargeted human motion on the Unitree G1 humanoid robot using MuJoCo and Gymnasium. 
+G1 humanoid motion imitation with custom TD-MPC2, SAC, and the Unitree PPO baseline.
+The [Unitree RL mjlab](https://github.com/unitreerobotics/unitree_rl_mjlab) submodule supplies the simulation tasks and PPO.
 
 ## Setup
 
-1. **Conda Environment**:
+Use Linux with an NVIDIA GPU and a CUDA-compatible driver for training.
+Clone the repository and install the dependencies:
+
 ```bash
-conda create -n roblearn python=3.10
-conda activate roblearn
+git clone --recurse-submodules https://github.com/dineshvarunshankar/LocoMimic.git
+cd LocoMimic
+conda create -n locomimic python=3.11
+conda activate locomimic
+git submodule update --init --recursive
+python -m pip install -e ./unitree_rl_mjlab
+python -m pip install -r requirements.txt
 ```
 
-### 2. Install PyTorch
-Install PyTorch manually based on your platform before anything else:
+The pinned submodule installs `mjlab==1.2.0` and `mujoco-warp==3.5.0`.
+
+The example motion is `data/lafan1_retargeted_npz/g1/walk1_subject1.npz`.
+To convert another G1 CSV motion, use the submodule converter:
+
 ```bash
-# Linux with NVIDIA GPU (CUDA 12.x)
-pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
-
-# Mac M-series
-pip install torch==2.1.0
-
-# CPU only
-pip install torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+mkdir -p data/lafan1_retargeted_npz/g1
+python unitree_rl_mjlab/scripts/csv_to_npz.py \
+  --robot g1 \
+  --input-file /path/to/motion.csv \
+  --output-name "$PWD/data/lafan1_retargeted_npz/g1/motion.npz" \
+  --input-fps 30 --output-fps 50
 ```
 
-### 3. Install Dependencies
+Set `motion_path` in the algorithm configuration to use the converted motion.
+
+## Run
+
+Run all commands from the repository root.
+
+### TD-MPC2
+
 ```bash
-pip install -r requirements.txt
+python -m scripts.train.train_tdmpc2 \
+  --config agents/configs/tdmpc2_config.yaml \
+  --name tdmpc2_walk1 \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --num_envs 512
+
+python -m scripts.eval.eval_tdmpc2 \
+  --config agents/configs/tdmpc2_config.yaml \
+  --checkpoint models/tdmpc2_walk1/final.pt \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --num-envs 1 --episodes 1
 ```
 
-### 4. External Dependencies
-These are not committed to the repo — clone them separately:
+Add `--disable-wandb` to train without W&B.
+Add `--video` to evaluation to save an MP4.
+Use `--episode-length-s 20` to set the evaluation horizon.
+The `--no-terminations` flag disables failure conditions and retains the episode timeout.
+
+### SAC
+
 ```bash
-git clone https://github.com/google-deepmind/mujoco_menagerie
-git clone https://github.com/unitreerobotics/unitree_mujoco
+python -m scripts.train.train_sac \
+  --config agents/configs/sac_config.yaml \
+  --name sac_walk1 \
+  --task Unitree-G1-Tracking --num_envs 4096
+
+python -m scripts.eval.eval_sac \
+  --config agents/configs/sac_config.yaml \
+  --ckpt models/sac_walk1/final.pt \
+  --task Unitree-G1-Tracking --device cuda:0
 ```
 
-## Usage
+SAC evaluation opens the native viewer.
+Keep each `.rms.pt` normalization file beside its `.pt` checkpoint.
+Use `--fast-sac` for both training and evaluation of the Fast SAC variant.
+SAC `buffer_size` counts transitions per environment.
 
-### Motion Visualization
+### PPO
+
 ```bash
-python visualize.py
-python visualize.py --csv data/lafan1_retargeted/g1/walk1_subject1.csv --speed 0.5
-python visualize.py --list
+python unitree_rl_mjlab/scripts/train.py Unitree-G1-Tracking \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --env.scene.num-envs 4096
+
+python unitree_rl_mjlab/scripts/play.py Unitree-G1-Tracking \
+  --motion-file data/lafan1_retargeted_npz/g1/walk1_subject1.npz \
+  --checkpoint-file /path/to/model.pt
 ```
 
-### Training
-```bash
-# SAC
-PYTHONPATH=. python -m train.train
+PPO checkpoints are in `logs/rsl_rl/`.
+SAC and TD-MPC2 checkpoints are in `models/<run_name>/`.
 
-# Random baseline
-PYTHONPATH=. python scripts/random_baseline.py
-```
+## References
 
-### Project Structure
-```
-env/
-  motion_clip.py      — loads reference motion from CSV
-  locomimic_env.py    — Gymnasium environment for motion imitation
-train/
-  agents/
-    sac/              — SAC implementation from scratch
-  configs/            — YAML hyperparameter configs
-  train.py            — main training loop with wandb logging
-scripts/
-  random_baseline.py  — random agent evaluation
-visualize.py          — interactive motion visualization
-```
+- [TD-MPC2: Scalable, Robust World Models for Continuous Control](https://arxiv.org/abs/2310.16828)
+- [Soft Actor-Critic](https://arxiv.org/abs/1801.01290)
+- [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
